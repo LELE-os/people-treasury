@@ -1,3 +1,0 @@
-[workspace]
-members = ["frost", "slip39", "client"]
-resolver = "2"
