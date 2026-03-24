@@ -1,0 +1,9 @@
+[package]
+name = "people-treasury-frost"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+frost-rerandomized = "0.2"
+rand = "0.8"
+hex = "0.4"
