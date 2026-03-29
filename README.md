@@ -1,62 +1,160 @@
-# people-treasury
-A decentralized treasury system for direct democracy using FROST and SLIP39
-# People's Treasury
+# 人民财政系统（People's Treasury）
 
-**English** | [中文](./README_zh.md)
+一个基于 FROST 门限签名和家庭偏移的去中心化财政系统。老百姓共同控制一个财政钱包，任意半数人签名即可拨款。实现全民直接参与的财政资金管理，无代表、无中间层。
 
-A decentralized treasury system where **every citizen holds a key**. No representatives, no middlemen.
+---
 
-## Why
+## 核心特性
 
-Governments spend public money. Citizens should control it.
+| 特性 | 说明 |
+|------|------|
+| **去中心化治理** | 40 人中共识，20 人签名即可拨款 |
+| **家庭内恢复** | 3 个家人即可恢复私钥的“家庭偏移”部分 |
+| **社会层恢复** | 20 个其他人可恢复私钥的“基础私钥片”部分 |
+| **双重验证** | 恢复私钥需要社会共识 + 家庭认可 |
+| **可验证性** | 家庭偏移可独立验证，无需信任系统 |
 
-This project uses threshold signatures (FROST) and secret sharing (SLIP39) to let any M out of N citizens approve a spending transaction, while keeping the final signature indistinguishable from a single-user wallet.
+---
 
-## How it works
+## 技术架构
 
-- **Public key**: One single public key on-chain (no 2000 public keys)
-- **Signing**: Any M of N citizens can collaboratively sign a transaction using FROST
-- **Recovery**: If a citizen loses their key, any T other citizens can recover it using SLIP39
-- **Governance**: All operations (spending, recovery, member changes) are recorded on-chain
 
-## Components
+```
 
-- `frost/` - FROST threshold signature implementation (Rust)
-- `slip39/` - Secret sharing for key recovery (Rust)
-- `contract/` - Solana smart contract (Anchor)
-- `client/` - CLI wallet for citizens
-- `docs/` - Whitepaper and specifications
+┌─────────────────────────────────────────────────────────────────┐
+│                       人民财政签名系统                          │
+├─────────────────────────────────────────────────────────────────┤
+│  密钥生成                                                       │
+│  ├── FROST (generate_with_dealer) ──→ 基础私钥片 (40份)         │
+│  └── 每个家庭: 2次多项式 (f(x)=a₁·x+a₂·x²)                      │
+│       └── 家庭偏移 offset_i = f(成员索引)                        │
+│       └── 最终私钥片 = 基础私钥片 + 家庭偏移                      │
+├─────────────────────────────────────────────────────────────────┤
+│  签名流程 (FROST 两轮 + 文件通信)                                │
+│  ├── Round 1: 每个老百姓生成 commitment                         │
+│  ├── 聚合器: 收集 20 个 commitment ──→ SigningPackage            │
+│  └── Round 2: 每个老百姓生成签名片 ──→ 聚合器聚合签名            │
+├─────────────────────────────────────────────────────────────────┤
+│  恢复流程 (双重恢复)                                             │
+│  ├── 家庭恢复 (3-of-5): 拉格朗日插值恢复偏移                     │
+│  └── 社会恢复 (20-of-40): FROST RTS 恢复基础私钥片               │
+│       └── 最终私钥片 = 基础私钥片 + 偏移                         │
+└─────────────────────────────────────────────────────────────────┘
 
-## Roadmap
+```
 
-### Phase 1: Core Crypto (2026.04 – 2026.05)
-- [ ] FROST 3-of-5 prototype (local Rust)
-- [ ] FROST 1000-of-2000 simulation (local Rust)
-- [ ] SLIP39 30-of-2000 recovery prototype
+---
 
-### Phase 2: On-chain Integration (2026.06 – 2026.07)
-- [ ] Solana smart contract with dynamic member list (Anchor)
-- [ ] Integration: FROST signature → Solana transaction
+## 快速开始
 
-### Phase 3: Client & UX (2026.08 – 2026.10)
-- [ ] CLI wallet for citizens (Rust)
-- [ ] Mobile wallet prototype (Flutter)
-
-### Phase 4: Production & Submission (2026.11 – 2027.01)
-- [ ] Testnet deployment
-- [ ] Whitepaper and demo video
-- [ ] **Hackathon submission** ✅
-
-## Getting Started
+### 1. 初始化系统（生成 40 个钱包）
 
 ```bash
-# Clone
-git clone https://github.com/yourusername/people-treasury.git
-cd people-treasury
+cargo run --bin init_wallet
+```
 
-# Build FROST demo
-cargo build --release
-cargo run --example frost_3of5
+生成文件：
 
-# Run SLIP39 demo
-cargo run --example slip39_3of5
+· wallet_1.dat ~ wallet_40.dat（FROST 基础私钥片）
+· wallet_1_offset.dat ~ wallet_40_offset.dat（家庭偏移）
+· public_key.dat（组公钥）
+· all_key_packages.dat（所有基础私钥片汇总）
+· family_offsets.dat（所有偏移汇总）
+
+2. 签名拨款（20 人签名）
+
+启动聚合器（一个终端）：
+
+```bash
+cargo run --bin aggregator
+```
+
+运行 20 个老百姓（开 20 个新终端）：
+
+```bash
+cargo run --bin sign -- 1
+cargo run --bin sign -- 2
+...
+cargo run --bin sign -- 20
+```
+
+聚合器输出最终签名，保存到 signature.dat。
+
+3. 恢复私钥（模拟丢失）
+
+```bash
+# 模拟丢失
+rm wallet_1.dat
+
+# 恢复私钥
+cargo run --bin recover_member -- 1
+
+# 验证恢复成功
+cargo run --bin sign -- 1
+```
+
+---
+
+文件说明
+
+文件 作用
+wallet_{id}.dat FROST 基础私钥片（用于签名）
+wallet_{id}_offset.dat 家庭偏移
+public_key.dat 组公钥
+signature.dat 最终签名结果
+commit_{id}.dat 签名时生成的 commitment（临时）
+nonce_{id}.dat 签名时生成的随机数（临时）
+sig_{id}.dat 签名时生成的签名片（临时）
+signing_package.dat 聚合器生成的签名包（临时）
+
+---
+
+运行环境
+
+· Rust 1.70+
+· 依赖：frost-ed25519、rand、bincode、curve25519-dalek
+
+```toml
+[dependencies]
+frost-ed25519 = "0.1"
+rand = "0.8"
+bincode = "1.3"
+serde = { version = "1.0", features = ["derive"] }
+hex = "0.4"
+curve25519-dalek = "4.1"
+```
+
+---
+
+项目结构
+
+```
+frost_demo/
+├── src/
+│   ├── init_wallet.rs      # 初始化，生成 40 个钱包
+│   ├── sign.rs             # 老百姓签名程序
+│   ├── aggregator.rs       # 聚合器
+│   └── recover_member.rs   # 私钥恢复程序
+├── Cargo.toml
+└── README.md
+```
+
+---
+
+## 技术亮点
+
+| 特性 | 说明 |
+|------|------|
+| **去中心化治理** | 20/40 门限签名，无单点控制 |
+| **双重恢复** | 家庭恢复（3人）+ 社会恢复（20人），安全冗余 |
+| **可验证性** | 家庭偏移可独立验证，无需信任系统 |
+| **离线通信** | 老百姓通过文件交换数据，无需网络 |
+| **隐私保护** | 私钥片和偏移量分离存储 |
+| **可扩展** | 可轻松扩展至 1000/2000 人规模 |
+
+## 后续规划
+
+- [ ] 扩展到 1000-of-2000
+- [ ] 集成到 Solana 测试网
+- [ ] 开发手机钱包 App
+- [ ] 图形化界面
